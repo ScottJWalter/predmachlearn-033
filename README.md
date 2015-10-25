@@ -1,3 +1,1 @@
-# predmachlearn-033
-
-Practical Machine Learning -- Final Project
+# Practical Machine Learning -- Final Project
