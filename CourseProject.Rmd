@@ -1,0 +1,194 @@
+---
+title: "Practical Machine Learning - Course Project"
+author: "Scott J. Walter"
+date: "October 25, 2015"
+output: html_document
+---
+
+## Summary
+
+### Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways.  
+
+### Reference
+More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+### Data
+The training data for this project are available at:
+
+`https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv`
+
+The test data are available at:
+
+`https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv`
+
+### Goal
+The goal of this project is to predict the manner in which subjects did the exercise (the `classe` variable in the training set). The model will use the other variables to predict with. This report describes:
+* how the model is built
+* use of cross validation
+* an estimate of expected out of sample error
+
+## Data Preparation
+
+### Initialize Workspace
+
+We'll be using the several R packages and setting the seed for reproducibility:
+
+```{r warning=FALSE, message=FALSE}
+# clear workspace
+rm( list = ls() )
+
+## Load packages
+library(caret)
+
+library(rpart)
+library(rpart.plot)
+library(RColorBrewer)
+library(rattle)
+
+library(randomForest)
+
+# set seed
+set.seed(314159)
+```
+
+### Load Data Sets
+
+Now, load the data sets (either from local copies or the source URL if local copies haven't been retrieved):
+
+```{r}
+# load training data
+if (!file.exists("pml-training.csv")) {
+    download.file(
+        url = "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+        ,destfile="pml-training.csv"
+        ,method="libcurl"
+        )
+}
+
+# Load data, replacing known missing values with 'NA'    
+training <- read.csv( "pml-training.csv", na.strings=c("NA","#DIV/0!",""))
+
+# load testing data
+if (!file.exists("pml-testing.csv")) {
+    download.file(
+        url = "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+        , destfile = "pml-testing.csv"
+        , method = "libcurl"
+        )
+}
+    
+# Load data, replacing known missing values with 'NA'    
+testing <- read.csv( "pml-testing.csv", na.strings = c( "NA", "#DIV/0!", "" ))
+```
+
+### Tidying Data
+
+To make this data set more workable, we need to:
+1. Drop unnecessary columns
+2. Drop columns with NAs
+3. Drop any near zero predictors (NZVs)
+
+```{r}
+# 1.  Drop the first 7 columns as they're unnecessary for predicting.
+training <- training[ , 8:length(colnames( training ))]
+testing <- testing[ , 8:length(colnames( testing ))]
+
+# 2.  Drop colums with NAs
+training <- training[, colSums(is.na( training )) == 0] 
+testing <- testing[, colSums(is.na( testing )) == 0] 
+
+# 3.  Check for near zero variance predictors and drop them if necessary
+nzv <- nearZeroVar( training, saveMetrics = TRUE )
+zero.var.ind <- sum( nzv$nzv )
+
+if ( zero.var.ind > 0 ) {
+        training <- training[ , nzv$nzv == FALSE ]
+}
+```
+
+### Partioning Data
+
+To train the model, we partition the training data set into to smaller sets:  `training.training` and `training.validate` (creating a training testing subsets within the training data).  For this analysis, the data is split 60/40 (60% goes to `training.training`, 40% to `training.validate`):
+
+```{r}
+in.training <- createDataPartition(
+                y = training$classe
+                , p = 0.6
+                , list = FALSE
+                )
+
+training.training <- training[ in.training, ]; 
+dim( training.training ); 
+
+training.validate <- training[ -in.training, ]
+dim( training.validate )
+```
+
+## Model Development
+
+### Train Model
+
+To train the model, we're going to fit a Random Forest model because of its robustness.  We're also going to incorporate 5-fold cross-validation when applying the model (were the original sample set is randomly partitioned into 5 sub-samples, 4 for training, 1 for validation):
+
+```{r}
+control.parms <- trainControl( method = "cv", 5 )
+
+rf.model <- train( classe ~ .
+                   , data = training.training
+                   , method = "rf"
+                   , trControl = control.parms
+                   , ntree = 251
+                   )
+rf.model
+```
+
+### View Model
+
+To view the model's decision tree:
+
+```{r warning=FALSE}
+fancyRpartPlot( 
+    rpart(
+        classe ~ .
+        , data = training.training
+        , method = "class"
+        ) 
+)
+```
+
+### Evaluate Performance
+
+Now, test the trained model against the validation data set `training.validate`, comparing predicted values to actual values:
+
+```{r}
+# Given the model(rf.model), run the validation data set against it to generate
+# predictions.
+rf.predict <- predict( rf.model, training.validate )
+
+# view the confusion matrix
+confusionMatrix( training.validate$classe, rf.predict )
+
+# Determine accuracy
+accuracy <- postResample( rf.predict, training.validate$classe )
+acc.out <- accuracy[1]
+
+# and overall out-of-sample error
+ose <- 1 - as.numeric(
+            confusionMatrix( training.validate$classe, rf.predict )$overall[1]
+            )
+```
+
+This model has an accuracy of *`r accuracy[1]`*, and an overall out-of-sample error of *`r ose`*.
+
+## Result Predictions
+
+With the model trained, it is run against the testing data set to generate prediction results:
+
+```{r}
+results <- predict(rf.model
+                   , testing[, -length(names( testing ))]
+                   )
+results
+```
